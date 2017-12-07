@@ -37,7 +37,7 @@
 
 void test_NewMSSimulator_Constructors();
 
-void test_NewMSSimulator_RandomFill();
+void test_NewMSSimulator_RandomAntenna();
 
 int removeFile(const char *fpath, const struct stat *sb, int typeflag, 
                struct FTW* ftwbuf);
@@ -46,7 +46,7 @@ int main() {
 
   try {
     test_NewMSSimulator_Constructors();
-    test_NewMSSimulator_RandomFill();
+    test_NewMSSimulator_RandomAntenna();
   }
   catch (const casacore::AipsError& x) {
     std::cerr << "Exception : " << x.getMesg() << std::endl;
