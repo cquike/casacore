@@ -51,7 +51,8 @@ Euler::DataArrays Euler::get_arrays()
     return arrays[--available];
   }
 #endif
-  return std::make_pair(std::make_shared<Vector<Double>>(3), std::make_shared<Vector<Int>>(3));
+  return std::make_pair(casacore::CountedPtr<Vector<Double>>(new Vector<Double>(3)), 
+                        casacore::CountedPtr<Vector<Int>>(new Vector<Int>(3)));
 }
 
 void Euler::return_arrays(Euler::DataArrays array)

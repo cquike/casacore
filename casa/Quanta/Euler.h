@@ -190,7 +190,8 @@ class Euler
 
 private:
 //# Data
-    typedef std::pair<std::shared_ptr<Vector<Double>>, std::shared_ptr<Vector<Int>>> DataArrays;
+    typedef std::pair<casacore::CountedPtr<Vector<Double>>, 
+                      casacore::CountedPtr<Vector<Int>>> DataArrays;
 // data container
     DataArrays data;
 // vector with 3 Euler angles (data.first)
