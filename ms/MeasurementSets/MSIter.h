@@ -389,12 +389,13 @@ protected:
   Int nMS_p;
   CountedPtr<ROMSColumns> msc_p;
   Table curTable_p;
-  Int curMS_p, lastMS_p, curArray_p, lastArray_p, curSource_p;
-  String curFieldName_p, curSourceName_p;
-  Int curField_p, lastField_p, curSpectralWindow_p, lastSpectralWindow_p;
-  Int curPolarizationId_p, lastPolarizationId_p;
-  Int curDataDescId_p, lastDataDescId_p;
-  Bool more_p, newMS_p, newArray_p, newField_p, newSpectralWindow_p, 
+  Int curMS_p, lastMS_p;
+  std::vector<Int> curArray_p, lastArray_p, curSource_p;
+  std::vector<String> curFieldName_p, curSourceName_p;
+  std::vector<Int> curField_p, lastField_p, curSpectralWindow_p, lastSpectralWindow_p;
+  std::vector<Int> curPolarizationId_p, lastPolarizationId_p;
+  std::vector<Int> curDataDescId_p, lastDataDescId_p;
+  Bool more_p, newMS_p, newArray_p, newField_p, newSpectralWindow_p,
     newPolarizationId_p, newDataDescId_p, preselected_p,
     timeDepFeed_p, spwDepFeed_p, checkFeed_p;
   Int startChan_p;
@@ -452,14 +453,20 @@ inline Bool MSIter::newSpectralWindow() const
 { return newSpectralWindow_p;}
 inline Int MSIter::msId() const { return curMS_p;}
 inline Int MSIter::numMS() const { return nMS_p;}
-inline Int MSIter::arrayId() const {return curArray_p;}
-inline Int MSIter::fieldId() const { return curField_p;}
-inline Int MSIter::spectralWindowId() const 
+inline std::vector<Int> MSIter::arrayIds() const {return curArray_p;}
+inline std::vector<Int> MSIter::fieldIds() const { return curField_p;}
+inline std::vector<Int> MSIter::spectralWindowIds() const
 { return curSpectralWindow_p;}
-inline Int MSIter::polarizationId() const {return curPolarizationId_p;}
-inline Int MSIter::dataDescriptionId() const {return curDataDescId_p;}
-inline Bool MSIter::newPolarizationId() const { return newPolarizationId_p;}
-inline Bool MSIter::newDataDescriptionId() const { return newDataDescId_p;}
+inline std::vector<Int> MSIter::polarizationIds() const {return curPolarizationId_p;}
+inline std::vector<Int> MSIter::dataDescriptionIds() const {return curDataDescId_p;}
+inline Int MSIter::arrayId() const {return curArray_p[0];}
+inline Int MSIter::fieldId() const { return curField_p[0];}
+inline Int MSIter::spectralWindowId() const 
+{ return curSpectralWindow_p[0];}
+inline Int MSIter::polarizationId() const {return curPolarizationId_p[0];}
+inline Int MSIter::dataDescriptionId() const {return curDataDescId_p[0];}
+inline Bool MSIter::newPolarizationId() const { return newPolarizationId_p[0];}
+inline Bool MSIter::newDataDescriptionId() const { return newDataDescId_p[0];}
 inline Int MSIter::polFrame() const { return polFrame_p;}
 inline const MPosition& MSIter::telescopePosition() const
 { return telescopePosition_p;}
