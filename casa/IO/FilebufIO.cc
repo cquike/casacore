@@ -45,6 +45,7 @@ FilebufIO::FilebufIO()
   itsBuffer     (nullptr),
   itsBufSize    (0),
   itsFileDesc   (-1),
+  itsDupFileDesc(-1),
   itsStream     (nullptr)
 {}
 
@@ -55,6 +56,7 @@ FilebufIO::FilebufIO (int fd, uInt bufferSize)
   itsBuffer     (nullptr),
   itsBufSize    (0),
   itsFileDesc   (-1),
+  itsDupFileDesc(-1),
   itsStream     (nullptr)
 {
   attach (fd, bufferSize);
@@ -83,7 +85,8 @@ void FilebufIO::attach (int fd, uInt bufferSize)
   default:
     mode = "r+";
   }
-  itsStream = fdopen(fd, mode.c_str());
+  itsDupFileDesc = dup(fd);
+  itsStream = fdopen(itsDupFileDesc, mode.c_str());
   rewind(itsStream);
   if(bufferSize != 0)
   {
@@ -97,17 +100,12 @@ void FilebufIO::attach (int fd, uInt bufferSize)
 
 void FilebufIO::detach(Bool closeFile)
 {
-    if(itsStream != nullptr && itsBuffer.get() != nullptr)
-        setvbuf(itsStream, nullptr, _IONBF, itsBufSize);
-    // WARNING:
-    // This implementation is not correct. The file descriptor
-    // won't be properly closed if closeFile = true, leaking resources.
-    // On the other hand if fclose is always closed, then the client application
-    // will call close() which will cause problems since fclose also calls
-    // close. So there is no proper solution for this.
-    if(itsStream != nullptr && closeFile)
+    if(itsStream != nullptr)
         fclose(itsStream);
+    if(itsStream != nullptr && closeFile)
+        close(itsFileDesc);
     itsFileDesc = -1;
+    itsDupFileDesc = -1;
     itsStream   = nullptr;
 }
 

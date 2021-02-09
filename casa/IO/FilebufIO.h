@@ -162,6 +162,7 @@ private:
     std::unique_ptr<char[]> itsBuffer;
     size_t                  itsBufSize;
     int                     itsFileDesc;
+    int                     itsDupFileDesc;
     FILE *                  itsStream;
     String                  itsFileName;
 
