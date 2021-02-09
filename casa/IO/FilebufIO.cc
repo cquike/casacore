@@ -1,5 +1,5 @@
-//# FilebufIO.cc: Class for buffered IO on a file.
-//# Copyright (C) 1996,1997,1998,1999,2000,2001,2002
+//# FilebufIO.cc: Class for IO on a  file descriptor
+//# Copyright (C) 2001,2002
 //# Associated Universities, Inc. Washington DC, USA.
 //#
 //# This library is free software; you can redistribute it and/or modify it
@@ -42,25 +42,20 @@ FilebufIO::FilebufIO()
 : itsSeekable   (False),
   itsReadable   (False),
   itsWritable   (False),
-  itsFile       (-1),
+  itsBuffer     (nullptr),
   itsBufSize    (0),
-  itsBufLen     (0),
-  itsBuffer     (0),
-  itsBufOffset  (-1),
-  itsOffset     (-1),
-  itsSeekOffset (-1),
-  itsDirty      (False)
+  itsFileDesc   (-1),
+  itsStream     (nullptr)
 {}
 
 FilebufIO::FilebufIO (int fd, uInt bufferSize)
-: itsFile       (-1),
+: itsSeekable   (False),
+  itsReadable   (False),
+  itsWritable   (False),
+  itsBuffer     (nullptr),
   itsBufSize    (0),
-  itsBufLen     (0),
-  itsBuffer     (0),
-  itsBufOffset  (-1),
-  itsOffset     (-1),
-  itsSeekOffset (-1),
-  itsDirty      (False)
+  itsFileDesc   (-1),
+  itsStream     (nullptr)
 {
   attach (fd, bufferSize);
 }
@@ -71,349 +66,175 @@ FilebufIO::~FilebufIO()
 }
 
 
-void FilebufIO::attach (int fd, uInt bufSize)
+void FilebufIO::attach (int fd, uInt bufferSize)
 {
-  AlwaysAssert (itsFile == -1, AipsError);
-  itsFile       = fd;
-  itsOffset     = 0;
-  itsSeekOffset = -1;
-  itsDirty      = False;
+  //AlwaysAssert (itsFile == -1, AipsError);
+  itsFileDesc = fd;
+  int openFlags = fcntl(fd, F_GETFL, 0);
+  std::string mode;
+  switch(openFlags & O_ACCMODE)
+  {
+  case O_RDONLY:
+    mode = "r";
+    break;
+  case O_WRONLY:
+    mode = "w";
+    break;
+  default:
+    mode = "r+";
+  }
+  itsStream = fdopen(fd, mode.c_str());
+  rewind(itsStream);
+  if(bufferSize != 0)
+  {
+    itsBuffer.reset(new char[bufferSize]);
+    itsBufSize = bufferSize;
+    setvbuf(itsStream, itsBuffer.get(), _IOFBF, bufferSize);
+  }
   fillRWFlags (fd);
   fillSeekable();
-  setBuffer (bufSize);
 }
 
-void FilebufIO::setBuffer (Int64 bufSize)
+void FilebufIO::detach(Bool closeFile)
 {
-  if (itsBuffer) {
-    flush();
-    delete [] itsBuffer;
-    itsBuffer    = 0;
-    itsBufSize   = 0;
-    itsBufLen    = 0;
-    itsBufOffset = -1;
-  }
-  if (bufSize > 0) {
-    itsBuffer  = new char[bufSize];
-    itsBufSize = bufSize;
-    itsBufOffset = -Int(itsBufSize+1);
-  }
-}
-
-void FilebufIO::detach (Bool closeFile)
-{
-  setBuffer (0);
-  if (closeFile  &&  itsFile >= 0) {
-    ::traceCLOSE (itsFile);
-  }
-  itsFile = -1;
+    if(itsStream != nullptr && itsBuffer.get() != nullptr)
+        setvbuf(itsStream, nullptr, _IONBF, itsBufSize);
+    // WARNING:
+    // This implementation is not correct. The file descriptor
+    // won't be properly closed if closeFile = true, leaking resources.
+    // On the other hand if fclose is always closed, then the client application
+    // will call close() which will cause problems since fclose also calls
+    // close. So there is no proper solution for this.
+    if(itsStream != nullptr && closeFile)
+        fclose(itsStream);
+    itsFileDesc = -1;
+    itsStream   = nullptr;
 }
 
 void FilebufIO::fillRWFlags (int fd)
 {
-  itsReadable = False;
-  itsWritable = False;
-  int flags = fcntl (fd, F_GETFL);
-  if ((flags & O_RDWR)  ==  O_RDWR) {
-    itsReadable = True;
-    itsWritable = True;
-  } else if ((flags & O_WRONLY)  ==  O_WRONLY) {
-    itsWritable = True;
-  } else {
-    itsReadable = True;
-  }
+    itsReadable = False;
+    itsWritable = False;
+    int flags = fcntl (fd, F_GETFL);
+    if ((flags & O_RDWR)  ==  O_RDWR) {
+        itsReadable = True;
+        itsWritable = True;
+    } else if ((flags & O_WRONLY)  ==  O_WRONLY) {
+        itsWritable = True;
+    } else {
+        itsReadable = True;
+    }
 }
 
 void FilebufIO::fillSeekable()
 {
-  Int64 curOff = itsOffset;
-  itsSeekable = (doSeek (0, ByteIO::End)  >= 0);
-  itsOffset = curOff;
+    itsSeekable = (seek (0, ByteIO::Current)  >= 0);
 }
-
-
-String FilebufIO::fileName() const
-{
-  return "";
-}
-
 
 void FilebufIO::flush()
 {
-  if (itsDirty) {
-    writeBuffer (itsBufOffset, itsBuffer, itsBufLen);
-    itsDirty = False;
-  }
-}
-
-void FilebufIO::resync()
-{
-  AlwaysAssert (!itsDirty, AipsError);
-  itsBufLen     = 0;
-  itsBufOffset  = -Int(itsBufSize+1);
-  itsOffset     = 0;
-  itsSeekOffset = -1;
-}
-
-
-void FilebufIO::writeBuffer (Int64 offset, const char* buf, Int64 size)
-{
-  if (size > 0) {
-    if (offset != itsSeekOffset) {
-      ::traceLSEEK (itsFile, offset, SEEK_SET);
-      itsSeekOffset = offset;
-    }
-    if (::traceWRITE (itsFile, const_cast<char*>(buf), size) != size) {
-      int error = errno;
-      itsSeekOffset = -1;
-      throw AipsError (String("FilebufIO: write error for file ")
-		       + fileName() + ": " + strerror(error));
-    }
-    itsSeekOffset += size;
-  }
-}
-
-Int64 FilebufIO::readBuffer (Int64 offset, char* buf, Int64 size,
-                                  Bool throwException)
-{
-  if (offset != itsSeekOffset) {
-    ::traceLSEEK (itsFile, offset, SEEK_SET);
-    itsSeekOffset = offset;
-  }
-  Int64 bytesRead = ::traceREAD (itsFile, buf, size);
-  int error = errno;
-  if (bytesRead > Int(size)) { // Should never be executed
-    itsSeekOffset = -1;
-    throw AipsError ("FilebufIO::read - read returned a bad value"
-		     " for file " + fileName());
-  }
-  if (bytesRead != Int(size) && throwException == True) {
-    //# In case of a table reparation the remainder has to be filled with 0.
-#if defined(TABLEREPAIR)
-    memset ((char*)buf + bytesRead, 0, size-bytesRead);
-    bytesRead = size;
-#endif
-    if (bytesRead < 0) {
-      itsSeekOffset = -1;
-      throw AipsError (String("FilebufIO::read error for file ")
-		       + fileName() + ": " + strerror(error));
-    } else if (bytesRead < Int(size)) {
-      itsSeekOffset = -1;
-      throw AipsError ("FilebufIO::read - incorrect number of bytes ("
-		       + String::toString(bytesRead) + " out of "
-                       + String::toString(size) + ") read for file "
-                       + fileName());
-    }
-  }
-  itsSeekOffset += bytesRead;
-  return bytesRead;
+    if(itsStream != nullptr)
+        fflush(itsStream);
 }
 
 void FilebufIO::write (Int64 size, const void* buf)
 {
-  // Throw an exception if not writable.
-  if (!itsWritable) {
-    throw AipsError ("FilebufIO object (file " + fileName()
-		     + ") is not writable");
-  }
-  const char* bufc = static_cast<const char*>(buf);
-  // Determine blocknr of first and last full block.
-  Int64 st = (itsOffset + itsBufSize - 1) / itsBufSize;
-  Int64 end = (itsOffset + size) / itsBufSize;
-  Int64 blkst = st * itsBufSize - itsOffset;
-  Int64 sz = 0;
-  if (st < end) {
-    sz = (end-st) * itsBufSize;
-    // There are one or more full blocks.
-    // Write them all.
-    writeBuffer (st*itsBufSize, bufc+blkst, sz);
-    // Discard the current buffer if within these full blocks.
-    if (st*itsBufSize <= itsBufOffset
-    &&  end*itsBufSize >= itsBufOffset+itsBufSize) {
-      itsDirty = False;
-      itsBufOffset = -Int(itsBufSize+1);
-      itsBufLen = 0;
+    // Throw an exception if not writable.
+    if (!itsWritable) {
+        throw AipsError ("FilebufIO " + itsFileName
+                         + "is not writable");
     }
-  }
-  // Write the start of the user buffer (if needed).
-  // Note that by doing this after the full block write, we avoid a
-  // possible flush of the current buffer if it is within the full blocks.
-  if (blkst > 0) {
-    if (blkst > size) {
-      blkst = size;
+    if(size > 0)
+    {
+        if (fwrite(buf, size, 1, itsStream) != 1) {
+            int error = errno;
+            throw AipsError ("FilebufIO: write error in "
+                             + itsFileName + ": " + strerror(error));
+        }
     }
-    writeBlock (blkst, bufc);
-  }
-  // Write the remainder of the user buffer (if needed).
-  // First update the offset in the stream.
-  blkst += sz;
-  itsOffset += blkst;
-  if (blkst < size) {
-    size -= blkst;
-    writeBlock (size, bufc+blkst);
-    itsOffset += size;
-  }
 }
 
 Int64 FilebufIO::read (Int64 size, void* buf, Bool throwException)
 {
   // Throw an exception if not readable.
   if (!itsReadable) {
-    throw AipsError ("FilebufIO object (file " + fileName()
-		     + ") is not readable");
+    throw AipsError ("FilebufIO::read " + itsFileName
+                     + " - is not readable");
   }
-  char* bufc = static_cast<char*>(buf);
-  // Determine blocknr of first and last full block.
-  Int64 st = (itsOffset + itsBufSize - 1) / itsBufSize;
-  Int64 end = (itsOffset + size) / itsBufSize;
-  Int64 blkst = st * itsBufSize - itsOffset;
-  Int64 sz = 0;
-  if (st < end) {
-    // There are one or more full blocks.
-    // Read them all.
-    // Handle the case that one of them is the current buffer.
-    Int64 stoff = st*itsBufSize;
-    Int64 endoff = end*itsBufSize;
-    char* bufp = bufc+blkst;
-    if (stoff <= itsBufOffset  &&  endoff >= itsBufOffset+itsBufSize) {
-      if (stoff < itsBufOffset) {
-	sz = itsBufOffset-stoff;
-	AlwaysAssert (readBuffer (stoff, bufp, sz, throwException) == sz,
-		      AipsError);
-	bufp += sz;
-      }
-      // Do the get of the current block via readBlock to handle
-      // the (hardly possible) case that itsBufSize!=itsBufLen.
-      Int64 savoff = itsOffset;
-      itsOffset = itsBufOffset;
-      sz += readBlock (itsBufSize, bufp, throwException);
-      itsOffset = savoff;
-      stoff = itsBufOffset + itsBufSize;
-    }
-    // Read the remaining full blocks.
-    sz += readBuffer (stoff, bufp, endoff-stoff, throwException);
+  size_t bytesRead = fread (buf, 1, size, itsStream);
+  //int error = errno;
+  if (ferror(itsStream) != 0 && throwException) { // Should never be executed
+    throw AipsError ("FilebufIO::read " + itsFileName
+                     + " - read returned a bad value");
   }
-  // Read the start of the user buffer (if needed).
-  Int64 total = sz;
-  if (blkst > 0) {
-    if (blkst > size) {
-      blkst = size;
-    }
-    total += readBlock (blkst, bufc, throwException);
+  else if (bytesRead < (size_t)size && throwException) {
+      throw AipsError ("FilebufIO::read - incorrect number of bytes ("
+                       + String::toString(bytesRead) + " out of "
+                       + String::toString(size) + ") read for file "
+                       + fileName());
   }
-  // Read the remainder of the user buffer (if needed).
-  // First update the offset in the stream.
-  blkst += sz;
-  itsOffset += blkst;
-  if (blkst < size) {
-    sz = size - blkst;
-    total += readBlock (sz, bufc+blkst, throwException);
-    itsOffset += sz;
-  }
-  return total;
-}
 
-void FilebufIO::writeBlock (Int64 size, const char* buf)
-{
-  // Write a part of a block.
-  // It is ensured that the buffer fits in a single block and that it
-  // is not a full block.
-  // Flush current buffer if needed.
-  if (itsOffset < itsBufOffset || itsOffset >= itsBufOffset + itsBufSize) {
-    if (itsDirty) {
-      flush();
-    }
-    // Read the new buffer.
-    itsBufOffset = itsOffset / itsBufSize * itsBufSize;
-    itsBufLen = readBuffer (itsBufOffset, itsBuffer, itsBufSize, False);
-  }
-  Int64 st = itsOffset - itsBufOffset;
-  memcpy (itsBuffer+st, buf, size);
-  itsDirty = True;
-  if (st+size > itsBufLen) {
-    itsBufLen = st+size;
-  }
-}
-
-Int64 FilebufIO::readBlock (Int64 size, char* buf, Bool throwException)
-{
-  // Read a part of a block.
-  // It is ensured that the buffer fits in a single block and that it
-  // is not a full block.
-  // Read current buffer if needed. Flush if current block is dirty.
-  if (itsOffset < itsBufOffset || itsOffset >= itsBufOffset + itsBufSize) {
-    if (itsDirty) {
-      flush();
-    }
-    // Read the new buffer.
-    itsBufOffset = itsOffset / itsBufSize * itsBufSize;
-    itsBufLen = readBuffer (itsBufOffset, itsBuffer, itsBufSize, False);
-  }
-  Int64 st = itsOffset - itsBufOffset;
-#if defined(TABLEREPAIR)
-  if (st+size > itsBufLen) {
-    memset (itsBuffer+itsBufLen, 0, st+size-itsBufLen);
-    itsBufLen = st+size;
-  }
-#endif
-  if (st+size > itsBufLen) {
-    if (throwException) {
-      throw AipsError ("FilebufIO::readBlock - incorrect number of bytes"
-		       " read for file " + fileName());
-    }
-    if (itsBufLen > st) {
-      size = itsBufLen-st;
-    } else {
-      size = 0;
-    }
-  }
-  memcpy (buf, itsBuffer+st, size);
-  return size;
+  return bytesRead;
 }
 
 Int64 FilebufIO::doSeek (Int64 offset, ByteIO::SeekOption dir)
 {
-  switch (dir) {
-  case ByteIO::Begin:
-    itsOffset = offset;
-    break;
-  case ByteIO::End:
-    itsSeekOffset = ::traceLSEEK (itsFile, offset, SEEK_END);
-    itsOffset = itsSeekOffset;
-    break;
-  default:
-    itsOffset += offset;
-    break;
-  }
-  return itsOffset;
-}
+    if(itsStream == nullptr)
+        return 0;
 
+    switch (dir) {
+    case ByteIO::Begin:
+        fseeko (itsStream, offset, SEEK_SET);
+        break;
+    case ByteIO::End:
+        fseeko (itsStream, offset, SEEK_END);
+        break;
+    default:
+        fseeko (itsStream, offset, SEEK_CUR);
+	break;
+    }
+    return ftello (itsStream);
+}
 
 Int64 FilebufIO::length()
 {
-  itsSeekOffset = ::traceLSEEK (itsFile, 0, SEEK_END);
-  Int64 len = itsBufOffset+itsBufLen;
-  if (len < itsSeekOffset) {
-    len = itsSeekOffset;
-  }
-  return len;
+    // Get current position to be able to reposition.
+    Int64 pos = seek (0, ByteIO::Current);
+    // Seek to the end of the stream.
+    // If it fails, we cannot seek and the current position is the length.
+    Int64 len = seek (0, ByteIO::End);
+    if (len < 0) {
+	return pos;
+    }
+    // Reposition and return the length.
+    seek (pos, ByteIO::Begin);
+    return len;
 }
 
    
 Bool FilebufIO::isReadable() const
 {
-  return itsReadable;
+    return itsReadable;
 }
 
 Bool FilebufIO::isWritable() const
 {
-  return itsWritable;
+    return itsWritable;
 }
 
 Bool FilebufIO::isSeekable() const
 {
-  return itsSeekable;
+    return itsSeekable;
+}
+
+String FilebufIO::fileName() const
+{
+    return "";
+}
+
+void FilebufIO::resync()
+{
+    rewind(itsStream);
 }
 
 } //# NAMESPACE CASACORE - END
-

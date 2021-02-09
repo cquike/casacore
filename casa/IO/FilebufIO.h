@@ -1,5 +1,5 @@
-//# FilebufIO.h: Class for buffered IO on a file
-//# Copyright (C) 1996,1997,1999,2001,2002
+//# FilebufIO.h: Class for unbuffered IO on a file
+//# Copyright (C) 1996,1997,1999,2001
 //# Associated Universities, Inc. Washington DC, USA.
 //#
 //# This library is free software; you can redistribute it and/or modify it
@@ -28,12 +28,11 @@
 #ifndef CASA_FILEBUFIO_H
 #define CASA_FILEBUFIO_H
 
-
 //# Includes
+#include <memory>
 #include <casacore/casa/aips.h>
 #include <casacore/casa/IO/ByteIO.h>
 #include <casacore/casa/BasicSL/String.h>
-
 
 namespace casacore { //# NAMESPACE CASACORE - BEGIN
 
@@ -41,28 +40,24 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 
 // <use visibility=export>
 
-// <reviewed reviewer="UNKNOWN" date="before2004/08/25" tests="tByteIO" demos="">
+// <reviewed reviewer="Friso Olnon" date="1996/11/06" tests="tByteIO" demos="">
 // </reviewed>
 
 // <prerequisite> 
-//  <li> <linkto class=ByteIO>ByteIO</linkto>
+//    <li> <linkto class=ByteIO>ByteIO</linkto> class
+//    <li> file descriptors
 // </prerequisite>
 
-// <synopsis>
+// <synopsis> 
 // This class is a specialization of class
-// <linkto class=ByteIO>ByteIO</linkto>.
-// This class is doing IO on a file in a buffered way to reduce the number
-// of file accesses as much as possible.
-// It is part of the entire IO framework. It can for
-// instance be used to store data in canonical format in a file
-// in an IO-efficient way
-// <br>
-// The buffer size is dynamic, so any time it can be set as needed.
+// <linkto class=ByteIO>ByteIO</linkto>. It uses a file descriptor
+// to read/write data.
 // <p>
-// It is also possible to construct a <src>FilebufIO</src> object
-// from a file descriptor (e.g. for a pipe or socket).
+// The file associated with the file descriptor has to be opened
+// before hand.
 // The constructor will determine automatically if the file is
 // readable, writable and seekable.
+// Note that on destruction the file descriptor is NOT closed.
 // </synopsis>
 
 // <example>
@@ -84,10 +79,8 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 // </example>
 
 // <motivation> 
-// The stdio package was used, but it proved to be very slow on SOlaris.
-// After a seek the buffer was refreshed, which increased the number
-// of file accesses enormously.
-// Also the interaction between reads and writes in stdio was poor.
+// Make it possible to use the Casacore IO functionality on any file.
+// In this way any device can be hooked to the IO framework.
 // </motivation>
 
 
@@ -101,17 +94,17 @@ public:
     // Construct from the given file descriptor.
     // Note that the destructor and the detach function implicitly close
     // the file descriptor.
-    explicit FilebufIO (int fd, uInt bufferSize=16384);
+    explicit FilebufIO (int fd, uInt bufferSize=0);
 
     // Attach to the given file descriptor.
     // Note that the destructor and the detach function implicitly close
     // the file descriptor.
-    void attach (int fd, uInt bufferSize=16384);
+    void attach (int fd, uInt bufferSize=0);
 
     // The destructor closes the file when it was owned and opened and not
     // closed yet.
     virtual ~FilebufIO();
-    
+
     // Write the number of bytes.
     virtual void write (Int64 size, const void* buf);
 
@@ -127,7 +120,7 @@ public:
 
     // Resync the file (i.e. empty the current buffer).
     virtual void resync();
-  
+
     // Get the length of the byte stream.
     virtual Int64 length();
        
@@ -147,6 +140,7 @@ public:
     uInt bufferSize() const
       { return itsBufSize; }
 
+
 protected:
     // Detach the FILE. Close it when needed.
     void detach (Bool closeFile=False);
@@ -161,37 +155,15 @@ protected:
     // new position.
     virtual Int64 doSeek (Int64 offset, ByteIO::SeekOption);
 
-    // Set a new buffer size.
-    // If a buffer was already existing, flush and delete it.
-    void setBuffer (Int64 bufSize);
-
-    // Write a buffer of given length into the file at given offset.
-    void writeBuffer (Int64 offset, const char* buf, Int64 size);
-
-    // Read a buffer of given length from the file at given offset.
-    Int64 readBuffer (Int64 offset, char* buf, Int64 size,
-		     Bool throwException);
-
-    // Write a block into the stream at the current offset.
-    // It is guaranteed that the block fits in a single buffer.
-    void writeBlock (Int64 size, const char* buf);
-
-    // Read a block from the stream at the current offset.
-    // It is guaranteed that the block fits in a single buffer.
-    Int64 readBlock (Int64 size, char* buf, Bool throwException);
-
 private:
-    Bool        itsSeekable;
-    Bool        itsReadable;
-    Bool        itsWritable;
-    int         itsFile;
-    Int64       itsBufSize;          // the buffer size
-    Int64       itsBufLen;           // the current buffer length used
-    char*       itsBuffer;
-    Int64       itsBufOffset;        // file offset of current buffer
-    Int64       itsOffset;           // current file offset
-    Int64       itsSeekOffset;       // offset last seeked
-    Bool        itsDirty;            // data written into current buffer?
+    Bool                    itsSeekable;
+    Bool                    itsReadable;
+    Bool                    itsWritable;
+    std::unique_ptr<char[]> itsBuffer;
+    size_t                  itsBufSize;
+    int                     itsFileDesc;
+    FILE *                  itsStream;
+    String                  itsFileName;
 
     // Copy constructor, should not be used.
     FilebufIO (const FilebufIO& that);
