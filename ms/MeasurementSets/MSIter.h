@@ -275,7 +275,7 @@ public:
   Bool newArray() const;
 
   // Return the FieldId of the first element in this iteration
-  Int fieldId() const;
+  Int fieldId();
 
   // Return True if FieldId/Source has changed since last iteration
   // Note that if MS_FIELD_ID is not part of the sorting columns this
@@ -322,7 +322,7 @@ public:
   const MFrequency& frequency0() const;
 
   // Return the rest frequency of the specified line as a Measure
-  const MFrequency& restFrequency(Int line=0) const;
+  const MFrequency& restFrequency(Int line=0);
 
   // Return the telescope position (if a known telescope) or the
   // position of the first antenna (if unknown)
@@ -382,7 +382,7 @@ public:
   //phasecenters, i.e time varying for a given field_id..
   //If the iterator is set so as one iteration has more that 1 time stamp
   //then this version is correct only for fixed phasecenters
-  const MDirection& phaseCenter() const ;
+  const MDirection& phaseCenter();
 
   //If the iterator is set so as one iteration has more that 1 value of time stamp
   // or fieldid
@@ -390,7 +390,7 @@ public:
   const MDirection phaseCenter(const Int fldID, const Double timeStamp) const ;
 
   //return FIELD table associated current fieldname and sourcename respectively
-  const String& fieldName() const;
+  const String& fieldName();
   const String& sourceName() const;
 
 protected:
@@ -490,7 +490,7 @@ inline const ScalarColumn<Int>& MSIter::colFieldIds() const
 inline const ScalarColumn<Int>& MSIter::colDataDescriptionIds() const
 { return colDataDesc_p;}
 inline Int MSIter::arrayId() const {return curArrayIdFirst_p;}
-inline Int MSIter::fieldId() const { return curFieldIdFirst_p;}
+inline Int MSIter::fieldId() {if(curFieldIdFirst_p==-1) setFieldInfo(); return curFieldIdFirst_p;}
 inline Int MSIter::spectralWindowId() const
 { return curSpectralWindowIdFirst_p;}
 inline Int MSIter::polarizationId() const {return curPolarizationId_p;}
