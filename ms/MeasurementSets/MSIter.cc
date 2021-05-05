@@ -414,7 +414,7 @@ MSIter::operator=(const MSIter& other)
   lastFieldId_p = other.lastFieldId_p;
   curSpectralWindowIdFirst_p = other.curSpectralWindowIdFirst_p;
   lastSpectralWindowId_p = other.lastSpectralWindowId_p;
-  curPolarizationId_p = other.curPolarizationId_p;
+  curPolarizationIdFirst_p = other.curPolarizationIdFirst_p;
   lastPolarizationId_p = other.lastPolarizationId_p;
   curDataDescIdFirst_p = other.curDataDescIdFirst_p;
   lastDataDescId_p = other.lastDataDescId_p;
@@ -425,7 +425,6 @@ MSIter::operator=(const MSIter& other)
   newSpectralWindowId_p = other.newSpectralWindowId_p;
   newPolarizationId_p = other.newPolarizationId_p;
   newDataDescId_p = other.newDataDescId_p;
-  timeDepFeed_p = other.timeDepFeed_p;
   spwDepFeed_p = other.spwDepFeed_p;
   checkFeed_p = other.checkFeed_p;
   storeSorted_p = other.storeSorted_p;
@@ -524,14 +523,53 @@ void MSIter::setState()
     checkFeed_p=True;
   curTable_p=tabIter_p[curMS_p]->table();
   colArray_p.attach(curTable_p,MS::columnName(MS::ARRAY_ID));
-  colDataDesc_p.attach(curTable_p,MS::columnName(MS::DATA_DESC_ID));
   colField_p.attach(curTable_p,MS::columnName(MS::FIELD_ID));
   // msc_p is already defined here (it is set in setMSInfo)
   if(newMS_p)
     msc_p->antenna().mount().getColumn(antennaMounts_p,True);
-  setDataDescInfo();
+
+  if(!ddInSort_p)
+  {
+    // If Data Description is not in the sorting columns, then the DD, SPW, pol
+    // can change between elements of the same iteration, so the safest
+    // is to signal that it changes.
+    newDataDescId_p = true;
+    newSpectralWindowId_p = true;
+    newPolarizationId_p = true;
+    freqCacheOK_p= false;
+
+    // This indicates that the current DD, SPW, Pol Ids are not computed.
+    // Note that the last* variables are not set, since the new* variables
+    // are unconditionally set to true.
+    // These cur* vars wiil be computed lazily if it is needed, together
+    // with some more vars set in cacheExtraDDInfo().
+    curDataDescIdFirst_p = -1;
+    curSpectralWindowIdFirst_p = -1;
+    curPolarizationIdFirst_p = -1;
+  }
+  else
+  {
+    // First we cache the current DD, SPW, Pol since we know it changed
+    cacheCurrentDDInfo();
+    
+    // In this case we know that the last* variables were computed and
+    // we can know whether there was a changed in these keywords by
+    // comparing the two.
+    newDataDescId_p=(lastDataDescId_p!=curDataDescIdFirst_p);
+    newSpectralWindowId_p=(lastSpectralWindowId_p!=curSpectralWindowIdFirst_p);
+    newPolarizationId_p=(lastPolarizationId_p!=curPolarizationIdFirst_p);
+
+    lastDataDescId_p=curDataDescIdFirst_p;
+    lastSpectralWindowId_p = curSpectralWindowIdFirst_p;
+    lastPolarizationId_p = curPolarizationIdFirst_p;
+
+    // Some extra information depends on the new* keywords, so compute
+    // it now that new* have been set.
+    cacheExtraDDInfo();
+  }
+
   setArrayInfo();
-  setFeedInfo();
+  feedInfoCached_p = false;
   setFieldInfo();
 
   // If time binning, update the MSInterval's offset to account for glitches.
@@ -576,18 +614,29 @@ void MSIter::setState()
 const Vector<Double>& MSIter::frequency() const
 {
   if (!freqCacheOK_p) {
-    This->freqCacheOK_p=True;
+    if(curSpectralWindowIdFirst_p==-1)
+    {
+      cacheCurrentDDInfo();
+      cacheExtraDDInfo();
+    }
+    cacheCurrentDDInfo();
+    freqCacheOK_p = true;
     Int spw = curSpectralWindowIdFirst_p;
     msc_p->spectralWindow().chanFreq().
-      get(spw,This->frequency_p,True);
+      get(spw, frequency_p, true);
   }
   return frequency_p;
 }
 
 const MFrequency& MSIter::frequency0() const
 {
+  if(curSpectralWindowIdFirst_p==-1)
+  {
+    cacheCurrentDDInfo();
+    cacheExtraDDInfo();
+  }
   // set the channel0 frequency measure
-    This->frequency0_p=
+  This->frequency0_p=
       Vector<MFrequency>(msc_p->spectralWindow().
 			 chanFreqMeas()(curSpectralWindowIdFirst_p))(0);
     // get the reference frame out off the freq measure and set epoch measure.
@@ -655,7 +704,7 @@ void MSIter::setArrayInfo()
   lastArrayId_p = curArrayIdFirst_p;
 }
 
-void MSIter::setFeedInfo()
+void MSIter::setFeedInfo() const
 {
   // Setup CJones and the receptor angle
 
@@ -690,10 +739,11 @@ void MSIter::setFeedInfo()
     Vector<Double> feedTimes=msc_p->feed().time().getColumn();
     Vector<Double> interval=msc_p->feed().interval().getColumn();
     // Assume time dependence
-    timeDepFeed_p=True;
+    bool timeDepFeed = true;
     // if all interval values are <= zero or very large,
     // there is no time dependence
-    if (allLE(interval,0.0)||allGE(interval,1.e9)) timeDepFeed_p=False;
+    if (allLE(interval,0.0)||allGE(interval,1.e9))
+      timeDepFeed = false;
     else {
       // check if any antennas appear more than once
       // check for each spectral window and feed in turn..
@@ -711,13 +761,13 @@ void MSIter::setFeedInfo()
 				     Sort::HeapSort | Sort::NoDuplicates);
 	if (nUniq!=nRow) unique=False;
       }
-      timeDepFeed_p=!unique;
+      timeDepFeed = !unique;
     }
     Vector<Int> spwId=msc_p->feed().spectralWindowId().getColumn();
     spwDepFeed_p = !(allEQ(spwId,-1));
     first=True;
     checkFeed_p = False;
-    if (timeDepFeed_p) {
+    if (timeDepFeed) {
       LogIO os;
       os << LogIO::WARN << LogOrigin("MSIter","setFeedInfo")
 	 <<" time dependent feed table encountered - not correctly handled "
@@ -727,6 +777,11 @@ void MSIter::setFeedInfo()
   // assume there's no time dependence, if there is we'll end up using the
   // last entry.
   if ((spwDepFeed_p && newSpectralWindowId_p) || first) {
+    if(curSpectralWindowIdFirst_p==-1)
+    {
+      cacheCurrentDDInfo();
+      cacheExtraDDInfo();
+    }
     Vector<Int> antennaId=msc_p->feed().antennaId().getColumn();
     Vector<Int> feedId=msc_p->feed().feedId().getColumn();
     Int maxAntId=max(antennaId);
@@ -784,41 +839,30 @@ void MSIter::setFeedInfo()
     CJonesFeed0_p=CJones_p.column(0);
     //
   }
+  feedInfoCached_p = true;
 }
 
-void MSIter::setDataDescInfo()
+void MSIter::cacheCurrentDDInfo() const
 {
+  colDataDesc_p.attach(curTable_p,MS::columnName(MS::DATA_DESC_ID));
+
   curDataDescIdFirst_p = colDataDesc_p(0);
   curSpectralWindowIdFirst_p = msc_p->dataDescription().spectralWindowId()
     (curDataDescIdFirst_p);
-  curPolarizationId_p = msc_p->dataDescription().polarizationId()
+  curPolarizationIdFirst_p = msc_p->dataDescription().polarizationId()
     (curDataDescIdFirst_p);
-  if(ddInSort_p)
-  {
-    newDataDescId_p=(lastDataDescId_p!=curDataDescIdFirst_p);
-    newSpectralWindowId_p=(lastSpectralWindowId_p!=curSpectralWindowIdFirst_p);
-    newPolarizationId_p=(lastPolarizationId_p!=curPolarizationId_p);
-  }
-  //If array is not in the sorting columns, then the DD, SPW, pol
-  //can change between elements of the same iteration, so the safest
-  //is to signal that it changes.
-  else
-  {
-    newDataDescId_p = true;
-    newSpectralWindowId_p = true;
-    newPolarizationId_p = true;
-  }
-  lastDataDescId_p=curDataDescIdFirst_p;
-  lastSpectralWindowId_p = curSpectralWindowIdFirst_p;
-  lastPolarizationId_p = curPolarizationId_p;
 
+}
+
+void MSIter::cacheExtraDDInfo() const
+{
   if (newSpectralWindowId_p)
     freqCacheOK_p=False;
 
   if (newPolarizationId_p) {
     polFrame_p=Circular;
     Int polType = Vector<Int>(msc_p->polarization().
-			      corrType()(curPolarizationId_p))(0);
+			      corrType()(curPolarizationIdFirst_p))(0);
     if (polType>=Stokes::XX && polType<=Stokes::YY) polFrame_p=Linear;
   }
 }
