@@ -147,6 +147,7 @@ private:
     std::shared_ptr<Vector<size_t>> sortGroupKeyIdxChange_p;
     Vector<rownr_t>::iterator sortGroupBoundariesIt_p;
     Vector<size_t>::iterator  sortGroupKeyIdxChangeIt_p;
+    RefTable* aRefTable_p;
 };
 
 
