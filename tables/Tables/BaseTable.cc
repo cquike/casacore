@@ -685,14 +685,17 @@ Vector<rownr_t>* BaseTable::rowStorage()
 
 //# Sort a table.
 BaseTable* BaseTable::sort (const Block<String>& names,
-			    const Block<CountedPtr<BaseCompare> >& cmpObj,
-                            const Block<Int>& order, int option)
+                            const Block<CountedPtr<BaseCompare> >& cmpObj,
+                            const Block<Int>& order, int option,
+                            std::shared_ptr<Vector<rownr_t>> sortGroupBoundaries,
+                            std::shared_ptr<Vector<size_t>> sortGroupKeyIdxChange)
+
 {
     AlwaysAssert (!isNull(), AipsError);
     //# Check if the vectors have equal length.
     uInt nrkey = names.nelements();
     if (nrkey != order.nelements()) {
-	throw (TableInvSort
+        throw (TableInvSort
                ("Length of column sort names and order vectors mismatch"
                 " for table " + name_p));
     }
@@ -700,20 +703,23 @@ BaseTable* BaseTable::sort (const Block<String>& names,
     //# Check if a sort key is indeed a column of scalars.
     PtrBlock<BaseColumn*> sortCol(nrkey);
     for (uInt i=0; i<nrkey; i++) {
-	sortCol[i] = getColumn (names[i]);         // get BaseColumn object
-	if (!sortCol[i]->columnDesc().isScalar()) {
-	    throw (TableInvSort ("Sort column " + names[i] + " in table " +
+        sortCol[i] = getColumn (names[i]);         // get BaseColumn object
+        if (!sortCol[i]->columnDesc().isScalar()) {
+            throw (TableInvSort ("Sort column " + names[i] + " in table " +
                                  name_p + " is not a scalar"));
-	}
+        }
     }
     // Return the result as a table.
-    return doSort (sortCol, cmpObj, order, option);
+    return doSort (sortCol, cmpObj, order, option,
+                   sortGroupBoundaries, sortGroupKeyIdxChange);
 }
 
 //# Do the actual sort.
 BaseTable* BaseTable::doSort (PtrBlock<BaseColumn*>& sortCol,
-			      const Block<CountedPtr<BaseCompare> >& cmpObj,
-                              const Block<Int>& order, int option)
+                              const Block<CountedPtr<BaseCompare> >& cmpObj,
+                              const Block<Int>& order, int option,
+                              std::shared_ptr<Vector<rownr_t>> sortGroupBoundaries,
+                              std::shared_ptr<Vector<size_t>> sortGroupKeyIdxChange)
 {
     uInt nrkey = sortCol.nelements();
     //# Create a sort object.
@@ -722,7 +728,7 @@ BaseTable* BaseTable::doSort (PtrBlock<BaseColumn*>& sortCol,
     Block<CountedPtr<ArrayBase> > data(nrkey);        // to remember data blocks
     Block<CountedPtr<BaseCompare> > cmp(cmpObj);
     for (uInt i=0; i<nrkey; i++) {
-	sortCol[i]->makeSortKey (sortobj, cmp[i], order[i], data[i]);
+        sortCol[i]->makeSortKey (sortobj, cmp[i], order[i], data[i]);
     }
     //# Create a reference table.
     //# This table will NOT be in row order.
@@ -734,6 +740,8 @@ BaseTable* BaseTable::doSort (PtrBlock<BaseColumn*>& sortCol,
     Vector<rownr_t>& rows = *(resultTable->rowStorage());
     //# Note that nrrow can change in case Sort::NoDuplicates was given.
     nrrow = sortobj.sort (rows, nrrow, option);
+    if(sortGroupBoundaries && sortGroupKeyIdxChange)
+        sortobj.unique(*sortGroupBoundaries, *sortGroupKeyIdxChange, rows);
     adjustRownrs (nrrow, rows, False);
     resultTable->setNrrow (nrrow);
     return resultTable;
@@ -1035,7 +1043,8 @@ rownr_t BaseTable::logicRows (rownr_t*& inx, Bool& allsw)
 BaseTableIterator* BaseTable::makeIterator
 (const Block<String>& names,
  const Block<CountedPtr<BaseCompare> >& cmpObj,
- const Block<Int>& order, int option)
+ const Block<Int>& order, int option,
+ bool cacheIterationBoundaries)
 {
     AlwaysAssert (!isNull(), AipsError);
     if (names.nelements() != order.nelements()
@@ -1043,7 +1052,8 @@ BaseTableIterator* BaseTable::makeIterator
 	throw (TableInvOper ("TableIterator: Unequal block lengths"));
     }
     BaseTableIterator* bti = new BaseTableIterator (this, names,
-						    cmpObj, order, option);
+                                                   cmpObj, order, option,
+                                                   cacheIterationBoundaries);
     return bti;
 }
 
