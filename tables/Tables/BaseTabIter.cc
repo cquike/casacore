@@ -171,7 +171,7 @@ BaseTable* BaseTableIterator::next()
     // one past the end of the current group.
     ++sortGroupBoundariesIt_p;
     rownr_t startNextGroup;
-    if(++sortGroupBoundariesIt_p == sortGroupBoundaries_p->end())
+    if(sortGroupBoundariesIt_p == sortGroupBoundaries_p->end())
         startNextGroup = sortTab_p->nrow();
     else
         startNextGroup = *sortGroupBoundariesIt_p;
