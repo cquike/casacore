@@ -344,7 +344,7 @@ void MSIter::construct(const Block<Int>& sortColumns,
     if (!useIn && !useSorted) {
       // we have to resort the input
       if (aips_debug) cout << "MSIter::construct - resorting table"<<endl;
-      sorted = bms_p[i].sort(columns, objComp, orders, Sort::QuickSort);
+      sorted = bms_p[i].sort(columns, Sort::Ascending, Sort::QuickSort);
     }
 
     // Only store if globally requested _and_ locally decided
@@ -655,7 +655,7 @@ const MFrequency& MSIter::frequency0() const
   return frequency0_p;
 }
 
-const MFrequency& MSIter::restFrequency(Int line) 
+const MFrequency& MSIter::restFrequency(Int line) const
 {
   MFrequency freq;
   if(curFieldIdFirst_p == -1)
@@ -880,13 +880,13 @@ void MSIter::cacheExtraDDInfo() const
   }
 }
 
-void MSIter::setFieldInfo()
+void MSIter::setFieldInfo() const
 {
   colField_p.attach(curTable_p,MS::columnName(MS::FIELD_ID));
   curFieldIdFirst_p=colField_p(0);
 }
 
-const String& MSIter::fieldName() {
+const String& MSIter::fieldName() const {
   if(newFieldId_p)
   {
     if(curFieldIdFirst_p == -1)
@@ -917,7 +917,7 @@ const String& MSIter::sourceName()  const {
   
   return curSourceNameFirst_p;
 }
-const MDirection& MSIter::phaseCenter() {
+const MDirection& MSIter::phaseCenter() const {
   if(msc_p){
     Double firstTimeStamp=ScalarColumn<Double>(curTable_p, MS::columnName(MS::TIME)).get(0);
     if(newFieldId_p || (firstTimeStamp != prevFirstTimeStamp_p)){
